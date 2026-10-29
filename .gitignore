@@ -6,3 +6,6 @@
 .idea/
 *.iml
 .env
+
+.metadata/
+AdminServer_backup/
