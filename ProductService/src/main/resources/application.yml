@@ -1,38 +1,32 @@
-
 server:
-  port: 8083
+  port: 8081
 
 spring:
   application:
     name: product-service
 
-  config:
-    import: "optional:configserver:http://localhost:8888"
+  profiles:
+    active: native
 
-  boot:
-    admin:
-      client:
-        url: http://localhost:9090
+  cloud:
+    config:
+      server:
+        native:
+          search-locations: file:./config-repo
 
-eureka:
-  client:
-    service-url:
-      defaultZone: http://localhost:8761/eureka/
+  datasource:
+    url: jdbc:mysql://aws-practices.ctie8c4qkf6l.ap-southeast-2.rds.amazonaws.com:3306/order_db?sslMode=VERIFY_IDENTITY
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: true
 
 management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics,prometheus
-
-  endpoint:
-    health:
-      show-details: always
-
-  tracing:
-    sampling:
-      probability: 1.0
-
-  zipkin:
-    tracing:
-      endpoint: http://localhost:9411/api/v2/spans
+        include: health,info
