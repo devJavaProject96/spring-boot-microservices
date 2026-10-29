@@ -1,0 +1,7 @@
+package com.dasTech.entity;
+ public record Product(
+        Long id,
+        String name,
+        BigDecimal price,
+        int stock
+    ) {}

@@ -1,0 +1,12 @@
+package com.dasTech.repository;
+
+import org.springframework.stereotype.Repository;
+
+import com.dasTech.entity.User;
+
+@Repository
+public interface UserRepo implements JPARepository<User, Integer> {
+
+	public User findByUname(String cuname);
+
+}

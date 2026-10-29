@@ -1,0 +1,31 @@
+package com.dasTech.controller;
+
+import java.math.BigDecimal;
+import java.util.Map;
+
+import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
+
+import com.dasTech.entity.Product;
+
+@RestController("/api/products")
+public class ProductController {
+	
+	private final Map<Long, Product> products = Map.of(1L, new Product(1L, "Laptop", new BigDecimal("65000.00"), 10),
+			2L, new Product(2L, "Keyboard", new BigDecimal("1800.00"), 30), 3L,
+			new Product(3L, "Monitor", new BigDecimal("12500.00"), 7));
+
+	@GetMapping("/{id}")
+	public Product getProduct(@PathVariable Long id) {
+		Product product = products.get(id);
+
+		if (product == null) {
+			throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Product not found: " + id);
+		}
+
+		return product;
+	}
+}
