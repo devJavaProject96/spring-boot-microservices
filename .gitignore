@@ -1,4 +1,12 @@
+# STS / Eclipse workspace
+.metadata/
+.recommenders/
+RemoteSystemsTempFiles/
+
+# Maven build output
 **/target/
+
+# IDE files
 **/.classpath
 **/.project
 **/.settings/
@@ -6,6 +14,8 @@
 .idea/
 *.iml
 .env
-
 .metadata/
 AdminServer_backup/
+# Logs and local secrets
+*.log
+.env
