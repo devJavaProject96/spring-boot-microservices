@@ -1,9 +1,11 @@
 
 pipeline {
     agent any
-triggers {
-    githubPush()
-}
+
+    triggers {
+        githubPush()
+    }
+
     options {
         timestamps()
         disableConcurrentBuilds()
@@ -16,6 +18,7 @@ triggers {
     }
 
     stages {
+
         stage('Checkout GitHub') {
             steps {
                 git branch: 'main',
@@ -28,7 +31,7 @@ triggers {
                     ).trim()
 
                     env.ECR_URI =
-                        "${AWS_ACCOUNT}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}"
+                        "${env.AWS_ACCOUNT}.dkr.ecr.${env.AWS_REGION}.amazonaws.com/${env.ECR_REPO}"
                 }
 
                 echo "Building commit: ${env.IMAGE_TAG}"
@@ -39,6 +42,7 @@ triggers {
             steps {
                 sh '''
                     set -eu
+
                     java -version
                     mvn -version
                     docker --version
@@ -67,14 +71,40 @@ triggers {
                     "
 
                     for SERVICE in $SERVICES; do
-                        echo "========== Building $SERVICE =========="
+                        echo ""
+                        echo "=========================================="
+                        echo "Building and testing: $SERVICE"
+                        echo "=========================================="
 
-                        test -f "$SERVICE/pom.xml" || {
-                            echo "Missing $SERVICE/pom.xml"
+                        if [ ! -f "$SERVICE/pom.xml" ]; then
+                            echo "ERROR: Missing $SERVICE/pom.xml"
                             exit 1
-                        }
+                        fi
 
-                        mvn -B -f "$SERVICE/pom.xml" clean verify
+                        if mvn -B -e \
+                            -f "$SERVICE/pom.xml" \
+                            clean verify; then
+
+                            echo "SUCCESS: $SERVICE"
+
+                        else
+                            BUILD_EXIT_CODE=$?
+
+                            echo "FAILED SERVICE: $SERVICE"
+                            echo "Maven exit code: $BUILD_EXIT_CODE"
+
+                            echo "Checking test reports..."
+
+                            find "$SERVICE/target/surefire-reports" \
+                                -maxdepth 1 \
+                                -type f \
+                                -name '*.txt' \
+                                -print 2>/dev/null || true
+
+                            echo "Check the exception above for the root cause."
+
+                            exit "$BUILD_EXIT_CODE"
+                        fi
                     done
                 '''
             }
@@ -117,7 +147,15 @@ triggers {
                     "
 
                     for SERVICE in $SERVICES; do
-                        echo "========== Packaging image: $SERVICE =========="
+                        echo ""
+                        echo "=========================================="
+                        echo "Packaging Docker image: $SERVICE"
+                        echo "=========================================="
+
+                        test -d "$SERVICE/target" || {
+                            echo "Missing target directory for $SERVICE"
+                            exit 1
+                        }
 
                         JAR_FILE=$(find "$SERVICE/target" \
                             -maxdepth 1 \
@@ -130,7 +168,7 @@ triggers {
                             -print -quit)
 
                         if [ -z "$JAR_FILE" ]; then
-                            echo "No executable JAR found for $SERVICE"
+                            echo "ERROR: No executable JAR found for $SERVICE"
                             exit 1
                         fi
 
@@ -144,10 +182,11 @@ EXPOSE 8080
 ENTRYPOINT ["java", "-jar", "app.jar"]
 DOCKERFILE
 
-                        IMAGE_TAG="$SERVICE-$IMAGE_TAG"
-                        IMAGE="$ECR_URI:$IMAGE_TAG"
+                        SERVICE_IMAGE_TAG="${SERVICE}-${IMAGE_TAG}"
+                        IMAGE="${ECR_URI}:${SERVICE_IMAGE_TAG}"
 
                         docker build \
+                            --pull \
                             -f "$SERVICE/Dockerfile.jenkins" \
                             -t "$IMAGE" \
                             "$SERVICE"
@@ -157,7 +196,7 @@ DOCKERFILE
                         rm -f "$SERVICE/app.jar" \
                               "$SERVICE/Dockerfile.jenkins"
 
-                        echo "Successfully pushed $IMAGE"
+                        echo "Successfully pushed: $IMAGE"
                     done
                 '''
             }
@@ -170,12 +209,15 @@ DOCKERFILE
         }
 
         failure {
-            echo 'Pipeline failed. Check the first failing stage in Console Output.'
+            echo 'Pipeline failed. Check the first failing stage and service in Console Output.'
         }
 
         always {
-            sh 'docker logout "$AWS_ACCOUNT.dkr.ecr.$AWS_REGION.amazonaws.com" || true'
+            sh '''
+                docker logout \
+                    "$AWS_ACCOUNT.dkr.ecr.$AWS_REGION.amazonaws.com" \
+                    >/dev/null 2>&1 || true
+            '''
         }
     }
 }
-
