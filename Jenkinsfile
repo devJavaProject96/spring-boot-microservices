@@ -53,62 +53,95 @@ pipeline {
             }
         }
 
-        stage('Build and Test All Services') {
-            steps {
-                sh '''
-                    set -eu
+        
+stage('Build and Test All Services') {
+    steps {
+        sh '''
+            set -eu
 
-                    SERVICES="
-                    APIGateway
-                    AdminServer
-                    ConfigServer
-                    NotificationServices
-                    OrderServices
-                    PaymentServices
-                    ProductService
-                    ServiceRegistry
-                    ZipkinService
-                    "
+            # Locate the Java installation used by Jenkins
+            JAVA_HOME_REAL="${JAVA_HOME:-$(dirname "$(dirname "$(readlink -f "$(command -v java)")")")}"
+            export JAVA_HOME="$JAVA_HOME_REAL"
 
-                    for SERVICE in $SERVICES; do
-                        echo ""
-                        echo "=========================================="
-                        echo "Building and testing: $SERVICE"
-                        echo "=========================================="
+            TRUST_DIR="$WORKSPACE/.rds-certs"
+            TRUSTSTORE="$TRUST_DIR/cacerts"
 
-                        if [ ! -f "$SERVICE/pom.xml" ]; then
-                            echo "ERROR: Missing $SERVICE/pom.xml"
-                            exit 1
-                        fi
+            mkdir -p "$TRUST_DIR"
 
-                        if mvn -B -e \
-                            -f "$SERVICE/pom.xml" \
-                            clean verify; then
+            # Preserve Java's existing trusted certificates
+            cp "$JAVA_HOME/lib/security/cacerts" "$TRUSTSTORE"
 
-                            echo "SUCCESS: $SERVICE"
+            # Download the official AWS RDS CA bundle
+            curl -fsSL \
+              https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem \
+              -o "$TRUST_DIR/global-bundle.pem"
 
-                        else
-                            BUILD_EXIT_CODE=$?
+            # Split the bundle into individual certificates
+            awk -v dir="$TRUST_DIR" '
+              /-----BEGIN CERTIFICATE-----/ {
+                  n++
+                  file = sprintf("%s/rds-ca-%02d.pem", dir, n)
+              }
+              file != "" { print > file }
+              /-----END CERTIFICATE-----/ {
+                  close(file)
+                  file = ""
+              }
+            ' "$TRUST_DIR/global-bundle.pem"
 
-                            echo "FAILED SERVICE: $SERVICE"
-                            echo "Maven exit code: $BUILD_EXIT_CODE"
+            # Import certificates into the copied Java truststore
+            for CERT in "$TRUST_DIR"/rds-ca-*.pem; do
+                [ -f "$CERT" ] || continue
 
-                            echo "Checking test reports..."
+                ALIAS=$(basename "$CERT" .pem)
 
-                            find "$SERVICE/target/surefire-reports" \
-                                -maxdepth 1 \
-                                -type f \
-                                -name '*.txt' \
-                                -print 2>/dev/null || true
+                keytool -importcert \
+                    -noprompt \
+                    -trustcacerts \
+                    -alias "$ALIAS" \
+                    -file "$CERT" \
+                    -keystore "$TRUSTSTORE" \
+                    -storepass changeit
+            done
 
-                            echo "Check the exception above for the root cause."
+            # Apply trust settings to Maven and Java test processes
+            export JAVA_TOOL_OPTIONS="${JAVA_TOOL_OPTIONS:-} -Djavax.net.ssl.trustStore=$TRUSTSTORE -Djavax.net.ssl.trustStorePassword=changeit"
 
-                            exit "$BUILD_EXIT_CODE"
-                        fi
-                    done
-                '''
-            }
-        }
+            echo "Java RDS truststore configured."
+            java -version
+            mvn -version
+
+            SERVICES="
+            APIGateway
+            AdminServer
+            ConfigServer
+            NotificationServices
+            OrderServices
+            PaymentServices
+            ProductService
+            ServiceRegistry
+            ZipkinService
+            "
+
+            for SERVICE in $SERVICES; do
+                echo "========== Building $SERVICE =========="
+
+                if [ ! -f "$SERVICE/pom.xml" ]; then
+                    echo "Missing $SERVICE/pom.xml"
+                    exit 1
+                fi
+
+                if ! mvn -B -e -f "$SERVICE/pom.xml" clean verify; then
+                    echo "FAILED SERVICE: $SERVICE"
+                    exit 1
+                fi
+
+                echo "SUCCESS: $SERVICE"
+            done
+        '''
+    }
+}
+
 
         stage('Login to Amazon ECR') {
             steps {
